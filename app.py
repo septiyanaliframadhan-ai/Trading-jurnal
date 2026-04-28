@@ -10,6 +10,7 @@ st.set_page_config(
 )
 
 st.title("📊 AI Trading Journal – Binance")
+st.caption("Auto data dari Binance • 30 hari terakhir")
 
 # =====================
 # 🔐 AUTO LOGIN
@@ -57,16 +58,22 @@ if api_key and secret:
     since = exchange.parse8601((datetime.utcnow() - timedelta(days=30)).isoformat())
 
     # =====================
-    # 🧠 AUTO DETECT
+    # 🧠 AUTO DETECT AMAN
     # =====================
     symbols = set()
     all_trades = []
 
     try:
-        trades = exchange.fetch_my_trades(since=since)
+        # coba ambil default pair dulu
+        trades = exchange.fetch_my_trades("BTC/USDT", since=since)
         for t in trades:
             symbols.add(t['symbol'])
+            all_trades.append(t)
     except:
+        pass
+
+    # fallback scan pair
+    if not all_trades:
         markets = exchange.load_markets()
         for symbol in markets:
             if "/USDT" in symbol:
@@ -78,30 +85,27 @@ if api_key and secret:
                 except:
                     pass
 
-    if not all_trades:
-        for sym in symbols:
-            try:
-                all_trades += exchange.fetch_my_trades(sym, since=since)
-            except:
-                pass
-
     df = pd.DataFrame(all_trades)
 
     if not df.empty:
 
-        df['profit'] = df['cost'] * (df['side'] == 'sell') - df['cost'] * (df['side'] == 'buy')
+        df['profit'] = df.apply(
+            lambda row: row['cost'] if row['side'] == 'sell' else -row['cost'],
+            axis=1
+        )
+
         df['time'] = pd.to_datetime(df['timestamp'], unit='ms')
         df = df.sort_values('time')
 
         wins = df[df['profit'] > 0]
         losses = df[df['profit'] < 0]
 
-        winrate = len(wins)/len(df)*100
+        winrate = len(wins) / len(df) * 100 if len(df) > 0 else 0
         avg_win = wins['profit'].mean() if not wins.empty else 0
         avg_loss = losses['profit'].mean() if not losses.empty else 0
 
-        rr = abs(avg_win/avg_loss) if avg_loss != 0 else 0
-        profit_factor = abs(wins['profit'].sum()/losses['profit'].sum()) if not losses.empty else 0
+        rr = abs(avg_win / avg_loss) if avg_loss != 0 else 0
+        profit_factor = abs(wins['profit'].sum() / losses['profit'].sum()) if not losses.empty else 0
 
         total_profit = df['profit'].sum()
 
@@ -159,13 +163,13 @@ if api_key and secret:
             st.error("🔴 Stop Trading")
 
     else:
-        st.warning("Tidak ada data trading")
+        st.warning("Tidak ada data trading 30 hari terakhir")
 
     # =====================
     # 📈 FUTURES
     # =====================
     try:
-        income = futures.fetch_income_history()
+        income = futures.fetch_income_history(limit=100)
         df_fut = pd.DataFrame(income)
 
         df_fut['income'] = df_fut['income'].astype(float)
@@ -176,6 +180,7 @@ if api_key and secret:
         st.subheader("📈 Futures")
         st.write(f"PnL: {round(realized,2)}")
         st.write(f"Funding: {round(funding,2)}")
+        st.write(f"Net: {round(realized + funding,2)}")
 
     except:
-        pass
+        st.warning("Data futures tidak tersedia")
